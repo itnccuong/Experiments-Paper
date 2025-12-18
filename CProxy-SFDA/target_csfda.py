@@ -474,14 +474,14 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 # )       
 
             # Store reliable samples in Proxy Domain
-            if ind_keep.numel():
-                # Move indices to cpu
-                indices_np = idxs[ind_keep].cpu().numpy().flatten()
+            # if ind_keep.numel():
+            #     # Move indices to cpu
+            #     indices_np = idxs[ind_keep].cpu().numpy().flatten()
                 
-                for idx_k in indices_np:
-                    path = img_path[idx_k]
-                    label = pseudo_labels_w[idx_k].item()
-                    proxy_domain.append(f"{path} {label}")
+            #     for idx_k in indices_np:
+            #         path = img_path[idx_k]
+            #         label = pseudo_labels_w[idx_k].item()
+            #         proxy_domain.append(f"{path} {label}")
             
             # inter domain mixup loss
             
