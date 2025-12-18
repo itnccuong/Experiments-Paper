@@ -36,6 +36,8 @@ from utils import (
     CustomDistributedDataParallel,
     ProgressMeter,
     plot_training_stats,
+    linear_rampup,
+    interleave,
 )
 
 
@@ -507,35 +509,134 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             else:
                 batch_accuracies.append(0.0)
 
-                ### Contrastive Learning ### 
-            feats_k  = model(images_k, cls_only=True)[0]                                  
-            f1       = F.normalize(torch.squeeze(feats_con[ind_remove]), dim=1)
-            f2       = F.normalize(torch.squeeze(feats_k[ind_remove]), dim=1)
-            features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
-            loss_contrast = contrastive_criterion(features)              
+                ### Contrastive Learning ###
+            if ind_remove.numel() > 0:
+                feats_k = model(images_k, cls_only=True)[0]
+                f1 = F.normalize(torch.squeeze(feats_con[ind_remove]), dim=1)
+                f2 = F.normalize(torch.squeeze(feats_k[ind_remove]), dim=1)
+                features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+                loss_contrast = contrastive_criterion(features)
+            else:
+                loss_contrast = torch.tensor(0.0).cuda()
+
+            ### Inter-domain Mixup ###
+            mix_cls_loss = torch.tensor(0.).cuda()
+            if ind_keep.numel() > 0:
+                # Assuming args.learn.alpha and args.learn.mix_ratio will be available in the config.
+                # Using 0.75 as default for alpha if not present.
+                alpha = getattr(args.learn, 'alpha', 0.75)
+                rho = np.random.beta(alpha, alpha)
+                
+                # Proxy samples are the reliable samples from the current batch
+                inputs_proxy = images_w[ind_keep.squeeze()]
+                labels_proxy = pseudo_labels_w[ind_keep.squeeze()]
+                
+                # Target samples are all samples from the current batch
+                inputs_target = images_w
+                
+                # Resize proxy to match target batch size for mixup
+                num_proxy = inputs_proxy.size(0)
+                num_target = inputs_target.size(0)
+                
+                if num_proxy < num_target:
+                    ratio = math.ceil(num_target / num_proxy)
+                    inputs_proxy = inputs_proxy.repeat(ratio, 1, 1, 1)[:num_target]
+                    labels_proxy = labels_proxy.repeat(ratio)[:num_target]
+                elif num_proxy > num_target:
+                    indices = torch.randperm(num_proxy)[:num_target]
+                    inputs_proxy = inputs_proxy[indices]
+                    labels_proxy = labels_proxy[indices]
+
+                mix_img = inputs_target * rho + inputs_proxy * (1 - rho)
+                
+                # It is assumed that the model can handle the mixed image and return logits.
+                _, mix_out = model(mix_img, cls_only=True)
+                
+                sft_label = torch.nn.functional.softmax(outputs_ema, dim=1)
+                targets_s = torch.zeros(num_target, num_class).cuda().scatter_(1, labels_proxy.view(-1, 1), 1)
+                
+                mix_target = sft_label * rho + targets_s * (1 - rho)
+
+                step = i + epoch * len(train_loader)
+                eff = step / args.learn.full_progress
+
+                # Assuming args.learn.mix_ratio will be available
+                mix_ratio = getattr(args.learn, 'mix_ratio', 1.0)
+                mix_cls_loss = eff * KLD(F.softmax(mix_out, dim=1), mix_target) * mix_ratio
+
+            ### ReMixMatch Regression Loss ###
+            remix_reg_loss = torch.tensor(0.).cuda()
+            reg_ratio = getattr(args.learn, 'reg_ratio', 0.0)
+            
+            # Only calculate if reg_ratio is > 0 to save compute
+            if reg_ratio > 0:
+                alpha = getattr(args.learn, 'alpha', 0.75)
+                lambda_u = getattr(args.learn, 'lambda_u', 75) # Default weight for consistency loss
+                
+                # Use the two augmented views: images_q and images_k
+                inputs_t = images_q
+                inputs_t2 = images_k
+                
+                # Targets based on the EMA model's prediction (soft labels)
+                # outputs_ema is (B, C), computed at the start of the batch
+                targets_u = torch.softmax(outputs_ema, dim=1)
+                
+                # In the reference code, they average targets from multiple views if available.
+                # Here we use the consensus outputs_ema.
+                
+                rho = np.random.beta(alpha, alpha)
+                all_inputs = torch.cat([inputs_t, inputs_t2], dim=0)
+                all_targets = torch.cat([targets_u, targets_u], dim=0)
+                
+                # Shuffle
+                ind_sorted = torch.randperm(all_inputs.size(0)).cuda()
+                input_a, input_b = all_inputs, all_inputs[ind_sorted]
+                target_a, target_b = all_targets, all_targets[ind_sorted]
+                
+                mixed_input = rho * input_a + (1 - rho) * input_b
+                mixed_target = rho * target_a + (1 - rho) * target_b
+                
+                # Interleave for Batch Normalization
+                # We need to split mixed_input into chunks of batch_size
+                # Since we concatenated 2 batches, the total size is 2*B
+                # We want 2 chunks of size B
+                current_batch_size = inputs_t.size(0)
+                mixed_input = list(torch.split(mixed_input, current_batch_size))
+                mixed_input = interleave(mixed_input, current_batch_size)
+                
+                # Forward pass
+                # Note: We need logits here. The model returns (feats, logits).
+                # The reference code handles list input in forward, but our model might not.
+                # We'll loop manually.
+                
+                logits_list = []
+                for input_chunk in mixed_input:
+                    _, logits_chunk = model(input_chunk, cls_only=True)
+                    logits_list.append(logits_chunk)
+                
+                # Put interleaved samples back
+                logits_list = interleave(logits_list, current_batch_size)
+                logits_u = torch.cat(logits_list, dim=0)
+                
+                probs_u = torch.softmax(logits_u, dim=1)
+                
+                # Loss calculation
+                step = i + epoch * len(train_loader)
+                # linear_rampup expects current iteration and total iterations (or rampup length)
+                # Reference uses args.max_iter as rampup length.
+                # We use args.learn.full_progress
+                rampup_val = linear_rampup(step, args.learn.full_progress)
+                
+                remix_reg_loss = (torch.mean((probs_u - mixed_target) ** 2) * lambda_u * rampup_val) * reg_ratio
 
 
-                ### Propagation Loss ###
-            ## If the clean selected set is empty, calculate loss for all samples  
-            # try:
-            #     loss_cls_rem , accuracy_psd_meter = propagation_loss(
-            #         torch.squeeze(outputs_ema[ind_remove]), torch.squeeze(logits_q[ind_remove]), torch.squeeze(pseudo_labels_w[ind_remove]), torch.squeeze(outputs_ema[ind_remove]), args
-            #     )
-            # except:
-            #     loss_cls_rem = 0
+            ### Loss Coefficients & Total Loss ###
+            difficulty_score = uncer_th / conf_th
+            loss_coef *= (1 - 0.001 * torch.exp(-1 / difficulty_score))
+            con_coeff *= np.exp(-0.0001)
 
-            # _ , accuracy_psd_meter = propagation_loss(
-            #     torch.squeeze(outputs_ema), torch.squeeze(logits_q), torch.squeeze(pseudo_labels_w), torch.squeeze(outputs_ema), args
-            # )        
-            # top1_psd.update(accuracy_psd_meter.item(), len(outputs_ema))
-
-                   ## Loss Coefficients ###
-            difficulty_score = uncer_th/conf_th
-            loss_coef *= (1- 0.001* torch.exp(-1/difficulty_score))
-            con_coeff *=  np.exp(-0.0001)
-
-            ## At the beginning, we want to learn from more confident samples
-            # loss = loss_coef * loss_cls + (1-loss_coef)* loss_cls_rem + con_coeff*loss_contrast  
+            # Define total loss, incorporating the new mix_cls_loss and remix_reg_loss
+            loss = con_coeff * loss_contrast + mix_cls_loss + remix_reg_loss
 
             ## Update the Parameters
             loss_meter.update(loss.item())
@@ -601,6 +702,11 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             save_checkpoint(model, optimizer, epoch, save_path=save_path_latest)
 
 
+
+
+
+def KLD(sfm, sft):
+    return -torch.mean(torch.sum(sfm.log() * sft, dim=1))
 
 
 @torch.jit.script
