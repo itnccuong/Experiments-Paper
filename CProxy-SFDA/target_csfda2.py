@@ -21,7 +21,7 @@ import numpy as np
 from Contrastive_loss import *
 import matplotlib.pyplot as plt
 import torchvision.utils as utils
-from sklearn.manifold import TSNE
+# from sklearn.manifold import TSNE
 
 from utils import (
     adjust_learning_rate,
@@ -42,71 +42,71 @@ from utils import (
 )
 
 
-@torch.no_grad()
-def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", max_samples=2000):
-    """Generate t-SNE visualization of feature representations."""
-    model.eval()
+# @torch.no_grad()
+# def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", max_samples=2000):
+#     """Generate t-SNE visualization of feature representations."""
+#     model.eval()
     
-    features_list = []
-    labels_list = []
-    paths_list = []
+#     features_list = []
+#     labels_list = []
+#     paths_list = []
     
-    logging.info("Extracting features for t-SNE...")
-    num_samples = 0
+#     logging.info("Extracting features for t-SNE...")
+#     num_samples = 0
     
-    for _, imgs, labels, idxs in dataloader:
-        if num_samples >= max_samples:
-            break
+#     for _, imgs, labels, idxs in dataloader:
+#         if num_samples >= max_samples:
+#             break
             
-        imgs = imgs.to("cuda")
+#         imgs = imgs.to("cuda")
         
-        # Extract features (not logits)
-        feats, _ = model(imgs, cls_only=True)
+#         # Extract features (not logits)
+#         feats, _ = model(imgs, cls_only=True)
         
-        features_list.append(feats.cpu())
-        labels_list.append(labels)
+#         features_list.append(feats.cpu())
+#         labels_list.append(labels)
         
-        num_samples += imgs.size(0)
+#         num_samples += imgs.size(0)
     
-    # Concatenate all features and labels
-    features = torch.cat(features_list, dim=0)[:max_samples]
-    labels = torch.cat(labels_list, dim=0)[:max_samples]
+#     # Concatenate all features and labels
+#     features = torch.cat(features_list, dim=0)[:max_samples]
+#     labels = torch.cat(labels_list, dim=0)[:max_samples]
     
-    logging.info(f"Running t-SNE on {features.shape[0]} samples...")
+#     logging.info(f"Running t-SNE on {features.shape[0]} samples...")
     
-    # Apply t-SNE
-    tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
-    features_2d = tsne.fit_transform(features.numpy())
+#     # Apply t-SNE
+#     tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
+#     features_2d = tsne.fit_transform(features.numpy())
     
-    # Plot
-    plt.figure(figsize=(10, 8))
+#     # Plot
+#     plt.figure(figsize=(10, 8))
     
-    # Determine number of classes
-    num_classes = labels.max().item() + 1
+#     # Determine number of classes
+#     num_classes = labels.max().item() + 1
     
-    # Use a colormap
-    colors = plt.cm.tab20(np.linspace(0, 1, num_classes))
+#     # Use a colormap
+#     colors = plt.cm.tab20(np.linspace(0, 1, num_classes))
     
-    for class_id in range(num_classes):
-        mask = labels == class_id
-        plt.scatter(
-            features_2d[mask, 0],
-            features_2d[mask, 1],
-            c=[colors[class_id]],
-            label=f"Class {class_id}",
-            alpha=0.6,
-            s=20
-        )
+#     for class_id in range(num_classes):
+#         mask = labels == class_id
+#         plt.scatter(
+#             features_2d[mask, 0],
+#             features_2d[mask, 1],
+#             c=[colors[class_id]],
+#             label=f"Class {class_id}",
+#             alpha=0.6,
+#             s=20
+#         )
     
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-    plt.title("t-SNE Visualization of Feature Space")
-    plt.xlabel("t-SNE Dimension 1")
-    plt.ylabel("t-SNE Dimension 2")
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+#     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+#     plt.title("t-SNE Visualization of Feature Space")
+#     plt.xlabel("t-SNE Dimension 1")
+#     plt.ylabel("t-SNE Dimension 2")
+#     plt.tight_layout()
+#     plt.savefig(save_path, dpi=150, bbox_inches='tight')
+#     plt.close()
     
-    logging.info(f"t-SNE visualization saved to {save_path}")
+#     logging.info(f"t-SNE visualization saved to {save_path}")
 
 
 @torch.no_grad()
@@ -339,7 +339,7 @@ def train_target_domain(args):
     ### Our Proposed Training Algorithm
     train_csfda(train_loader, val_loader, model, optimizer,  args)
 
-    filename = f"checkpoint_1_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
+    filename = f"checkpoint_2_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
     save_path = os.path.join('./checkpoint/', filename)
     save_checkpoint(model, optimizer, 1, save_path=save_path)
     logging.info(f"Saved checkpoint {save_path}")
@@ -389,9 +389,9 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
     loss_classes = [] 
     loss_coefs   = [] 
     con_losses   = [] 
+    unsupervised_losses    = [] 
     mix_cls_losses = []
     remix_reg_losses = []
-    unsupervised_losses    = [] 
     total_losses = [] # New: Track total loss
     uncertainty_thresholds = [] 
     conf_thress = [] 
@@ -459,44 +459,17 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                                 #############################################
             pred_start     = torch.nn.functional.softmax(torch.squeeze(torch.stack(outputs_emas)), dim=2).max(2)[0] 
 
-            ## Per-class threshold computation
-            batch_size = pseudo_labels_w.size(0)
-            pred_con = pred_start  # (N-3, batch_size) confidence scores
-            pred_std = pred_start.std(0)  # (batch_size,) uncertainty scores
-            
-            # Initialize per-class thresholds
-            per_class_conf_th = torch.zeros(num_class).to("cuda")
-            per_class_uncer_th = torch.zeros(num_class).to("cuda")
-            per_class_counts = torch.zeros(num_class).to("cuda")
-            
-            # Compute per-class thresholds based on EMA predictions
-            for c in range(num_class):
-                class_mask = (pseudo_labels_w == c)
-                class_count = class_mask.sum()
-                per_class_counts[c] = class_count
-                
-                if class_count > 0:
-                    # Per-class confidence threshold: mean confidence for this class
-                    per_class_conf_th[c] = pred_con[:, class_mask].mean()
-                    # Per-class uncertainty threshold: mean uncertainty for this class
-                    per_class_uncer_th[c] = pred_std[class_mask].mean()
-                else:
-                    # If no samples for this class, use global mean as fallback
-                    per_class_conf_th[c] = pred_con.mean()
-                    per_class_uncer_th[c] = pred_std.mean()
-            
-            # Compute weighted global thresholds: sum(class_size * class_threshold) / batch_size
-            conf_th = (per_class_counts * per_class_conf_th).sum() / batch_size
-            uncer_th = (per_class_counts * per_class_uncer_th).sum() / batch_size
-            
-            ## Confidence Based Selection (per-class threshold for each sample)
-            # Each sample is compared against its predicted class's threshold
-            sample_conf_th = per_class_conf_th[pseudo_labels_w]  # (batch_size,) threshold for each sample
-            confidence_sel = pred_con.mean(0) > sample_conf_th
-            
-            ## Uncertainty Based Selection (per-class threshold for each sample)
-            sample_uncer_th = per_class_uncer_th[pseudo_labels_w]  # (batch_size,) threshold for each sample
-            uncertainty_sel = pred_std < sample_uncer_th
+            ## Confidence Based Selection
+            pred_con       = pred_start                                                                                     
+            conf_thres     = pred_con.mean()
+            confidence_sel = pred_con.mean(0) > conf_thres                                      
+            conf_th = pred_con.mean()
+
+            ## Uncertainty Based Selection
+            pred_std              = pred_start.std(0)                                                                               
+            uncertainty_threshold = pred_std.mean(0)    
+            uncertainty_sel       = pred_std<uncertainty_threshold
+            uncer_th = pred_std.mean(0)
 
             ## Confidence and Uncertainty Based Selection
             truth_array = torch.logical_and(uncertainty_sel, confidence_sel)
@@ -570,7 +543,8 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             except:
                 loss_cls , accuracy_psd = propagation_loss(
                     torch.squeeze(outputs_ema), torch.squeeze(logits_q), torch.squeeze(pseudo_labels_w), torch.squeeze(outputs_ema), args
-                )      
+                )       
+
 
             # --- Cap Dominant Classes in Proxy Domain ---
             # To prevent overfitting to easy classes (bias), we limit the max samples per class.
@@ -594,7 +568,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 
                 ind_keep = ind_keep[mask_keep]
 
-            # Store reliable samples in Proxy Domain
+            # # Store reliable samples in Proxy Domain
             # if ind_keep.numel():
             #     # Move indices to cpu
             #     indices_np = idxs[ind_keep].cpu().numpy().flatten()
@@ -723,6 +697,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
 
             # Define total loss, incorporating the new mix_cls_loss and remix_reg_loss
             loss = con_coeff * loss_contrast + mix_cls_loss + remix_reg_loss + loss_coef * loss_cls
+            # loss = loss_coef * loss_cls + (1-loss_coef)* loss_cls_rem + con_coeff*loss_contrast  
 
             ## Update the Parameters
             loss_meter.update(loss.item())
@@ -768,22 +743,22 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                     'con_loss': con_losses,
                     'mix_cls_loss': mix_cls_losses,
                     'remix_reg_loss': remix_reg_losses,
-                    'prop_loss': unsupervised_losses,
+                    # 'prop_loss': unsupervised_losses,
                     'total_loss': total_losses, # New: Pass total loss
                     'val_acc_mean': acc_classes,
                     'val_acc_per_class': per_class_accs,
                 }
-                plot_training_stats(current_stats, save_path="training_process.png")
+                plot_training_stats(current_stats, save_path="training_process2.png")
 
                 # Save stats only every 50 iterations to save I/O
-                np.savez("training_stats.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
+                # np.savez("training_stats2.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
 
             ind += 1 
 
             ## Evaluate the model ##
         acc_per_class = eval_and_label_dataset(val_loader, model, args)
         
-        # Generate t-SNE visualization every epoch
+        # # Generate t-SNE visualization every epoch
         # if is_master(args):
         #     tsne_path = os.path.join(args.model_tta.src_log_dir, f"tsne_epoch_{epoch}.png")
         #     visualize_tsne(val_loader, model, args, save_path=tsne_path, max_samples=1500)
@@ -814,7 +789,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
         
         if is_master(args):
             # Save checkpoint for each epoch (replace existing)
-            filename_latest = f"checkpoint_1_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
+            filename_latest = f"checkpoint_2_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
             save_path_latest = os.path.join('./checkpoint/', filename_latest)
             save_checkpoint(model, optimizer, epoch, save_path=save_path_latest)
 

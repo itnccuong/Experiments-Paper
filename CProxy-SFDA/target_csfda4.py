@@ -339,7 +339,7 @@ def train_target_domain(args):
     ### Our Proposed Training Algorithm
     train_csfda(train_loader, val_loader, model, optimizer,  args)
 
-    filename = f"checkpoint_1_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
+    filename = f"checkpoint_4_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
     save_path = os.path.join('./checkpoint/', filename)
     save_checkpoint(model, optimizer, 1, save_path=save_path)
     logging.info(f"Saved checkpoint {save_path}")
@@ -691,8 +691,8 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             remix_reg_loss = torch.tensor(0.).cuda()
             reg_ratio = getattr(args.learn, 'reg_ratio', 1.0)
             
-            # Only calculate if reg_ratio is > 0 to save compute
-            if reg_ratio > 0:
+            # Only calculate if reg_ratio is > 0 and epoch is >= 10 to save compute
+            if reg_ratio > 0 and epoch >= 10:
                 alpha = getattr(args.learn, 'alpha', 0.75)
                 lambda_u = getattr(args.learn, 'lambda_u', 75)
                 
@@ -773,10 +773,10 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                     'val_acc_mean': acc_classes,
                     'val_acc_per_class': per_class_accs,
                 }
-                plot_training_stats(current_stats, save_path="training_process.png")
+                plot_training_stats(current_stats, save_path="training_process4.png")
 
                 # Save stats only every 50 iterations to save I/O
-                np.savez("training_stats.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
+                np.savez("training_stats4.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
 
             ind += 1 
 
@@ -814,7 +814,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
         
         if is_master(args):
             # Save checkpoint for each epoch (replace existing)
-            filename_latest = f"checkpoint_1_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
+            filename_latest = f"checkpoint_4_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
             save_path_latest = os.path.join('./checkpoint/', filename_latest)
             save_checkpoint(model, optimizer, epoch, save_path=save_path_latest)
 

@@ -354,6 +354,10 @@ def plot_training_stats(stats, save_path="training_process.png"):
     
     # 1. Losses (Batch-wise)
     plt.subplot(2, 2, 1)
+    if 'mix_cls_loss' in stats and len(stats['mix_cls_loss']) > 0:
+        plt.plot(stats['mix_cls_loss'], label='Mix Class Loss', alpha=0.6, linewidth=0.5)
+    if 'remix_reg_loss' in stats and len(stats['remix_reg_loss']) > 0:
+        plt.plot(stats['remix_reg_loss'], label='Remix Reg Loss', alpha=0.6, linewidth=0.5)
     if 'ce_loss' in stats and len(stats['ce_loss']) > 0:
         plt.plot(stats['ce_loss'], label='CE Loss', alpha=0.6, linewidth=0.5)
     if 'con_loss' in stats and len(stats['con_loss']) > 0:
@@ -455,4 +459,4 @@ def interleave(xy, batch):
     xy = [[v[offsets[p] : offsets[p + 1]] for p in range(nu + 1)] for v in xy]                             
     for i in range(1, nu + 1):                                                                             
         xy[0][i], xy[i][i] = xy[i][i], xy[0][i]                                                            
-    return [torch.cat(v, dim=0) for v in xy]
+    return [torch.cat(v, dim=0) for v in xy]    

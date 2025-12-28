@@ -5,8 +5,10 @@
 __pycache__/
 *.py[codz]
 *$py.class
-
+logs
 venv
+*.png
+*.npz
 checkpoint/*
 data/*
 output/*

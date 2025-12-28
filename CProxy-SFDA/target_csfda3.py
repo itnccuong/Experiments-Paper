@@ -339,7 +339,7 @@ def train_target_domain(args):
     ### Our Proposed Training Algorithm
     train_csfda(train_loader, val_loader, model, optimizer,  args)
 
-    filename = f"checkpoint_1_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
+    filename = f"checkpoint_3_{1:04d}_{args.data.src_domain}-{args.data.tgt_domain}-{args.sub_memo}_{args.seed}.pth.tar"
     save_path = os.path.join('./checkpoint/', filename)
     save_checkpoint(model, optimizer, 1, save_path=save_path)
     logging.info(f"Saved checkpoint {save_path}")
@@ -504,9 +504,9 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             ind_remove = (~truth_array).nonzero()
             
             try:
-                ind_total = torch.cat((torch.squeeze(ind_keep), torch.squeeze(ind_remove)), dim=0)
+                ind_total = torch.cat((ind_keep.flatten(), ind_remove.flatten()), dim=0)
             except:
-                ind_total = ind_remove
+                ind_total = ind_remove.flatten()
 
             ## Confidence Score Difference (DoC) Based Selection
             if ind_remove.numel():
@@ -525,7 +525,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 ind_add       = truth_array.nonzero()
                 
                 try:
-                    ind_keep   = torch.cat((torch.squeeze(ind_keep), torch.squeeze(ind_remove[ind_add])), dim=0)
+                    ind_keep   = torch.cat((ind_keep.flatten(), ind_remove[ind_add].flatten()), dim=0)
                     ind_remove = torch.stack([kk for kk in ind_total if kk not in ind_keep])
                 except:
                     pass 
@@ -564,7 +564,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                     counts_new = counts 
 
                 loss_cls , accuracy_psd = classification_loss(
-                    torch.squeeze(outputs_ema[ind_keep]), torch.squeeze(logits_q[ind_keep]), torch.squeeze(pseudo_labels_w[ind_keep]), torch.squeeze(outputs_ema[ind_keep]),  args, 1/counts_new.cuda()
+                    outputs_ema[ind_keep.flatten()], logits_q[ind_keep.flatten()], pseudo_labels_w[ind_keep.flatten()], outputs_ema[ind_keep.flatten()],  args, 1/counts_new.cuda()
                 )
 
             except:
@@ -635,8 +635,9 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 ### Contrastive Learning ###
             if ind_remove.numel() > 0:
                 feats_k = model(images_k, cls_only=True)[0]
-                f1 = F.normalize(torch.squeeze(feats_con[ind_remove]), dim=1)
-                f2 = F.normalize(torch.squeeze(feats_k[ind_remove]), dim=1)
+                # Use .flatten() instead of .squeeze() to handle the case when ind_remove has only 1 element
+                f1 = F.normalize(feats_con[ind_remove.flatten()], dim=1)
+                f2 = F.normalize(feats_k[ind_remove.flatten()], dim=1)
                 features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
                 loss_contrast = contrastive_criterion(features)
             else:
@@ -651,8 +652,9 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 rho = np.random.beta(alpha, alpha)
                 
                 # Proxy samples are the reliable samples from the current batch
-                inputs_proxy = images_w[ind_keep.squeeze()]
-                labels_proxy = pseudo_labels_w[ind_keep.squeeze()]
+                # Use .flatten() instead of .squeeze() to handle the case when ind_keep has only 1 element
+                inputs_proxy = images_w[ind_keep.flatten()]
+                labels_proxy = pseudo_labels_w[ind_keep.flatten()]
                 
                 # Target samples are all samples from the current batch
                 inputs_target = images_w
@@ -704,9 +706,8 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                 mixed_input_remix = rho * images_q + (1 - rho) * images_q[ind_perm]
                 mixed_target_remix = rho * targets_u + (1 - rho) * targets_u[ind_perm]
                 
-                # Single forward pass
-                with torch.no_grad():
-                    _, logits_u = model(mixed_input_remix, cls_only=True)
+                # with torch.no_grad():
+                _, logits_u = model(mixed_input_remix, cls_only=True)
                 
                 probs_u = torch.softmax(logits_u, dim=1)
                 
@@ -773,10 +774,10 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                     'val_acc_mean': acc_classes,
                     'val_acc_per_class': per_class_accs,
                 }
-                plot_training_stats(current_stats, save_path="training_process.png")
+                plot_training_stats(current_stats, save_path="training_process3.png")
 
                 # Save stats only every 50 iterations to save I/O
-                np.savez("training_stats.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
+                np.savez("training_stats3.npz", pseudo_label_acc = accuracies, acc_class= acc_classes, conf = conf_thress, unc = uncertainty_thresholds, labeled_loss_coeff = loss_coefs, con_coeff = con_coeffs, ce_loss = loss_classes, con_loss = con_losses, prop_loss = unsupervised_losses, sel_Samples = sel_Samples , unsel_samples = unsel_samples)
 
             ind += 1 
 
@@ -814,7 +815,7 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
         
         if is_master(args):
             # Save checkpoint for each epoch (replace existing)
-            filename_latest = f"checkpoint_1_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
+            filename_latest = f"checkpoint_3_latest_{args.data.src_domain}-{args.data.tgt_domain}.pth.tar"
             save_path_latest = os.path.join('./checkpoint/', filename_latest)
             save_checkpoint(model, optimizer, epoch, save_path=save_path_latest)
 
