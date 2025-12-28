@@ -382,10 +382,10 @@ def plot_training_stats(stats, save_path="training_process.png"):
     
     # Adjust figure layout based on whether we have thresholds
     if has_thresholds:
-        fig = plt.figure(figsize=(20, 12))
+        fig = plt.figure(figsize=(20, 16))
         subplot_layout = (2, 3)  # 2 rows, 3 columns
     else:
-        fig = plt.figure(figsize=(16, 12))
+        fig = plt.figure(figsize=(16, 16))
         subplot_layout = (2, 2)  # 2 rows, 2 columns
     
     # 1. Losses (Batch-wise)
