@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sfda_visda
-#SBATCH --output=/media02/nnthao15/Experiments/CProxy-SFDA/logs/%j.out
-#SBATCH --error=/media02/nnthao15/Experiments/CProxy-SFDA/logs/%j.err
+#SBATCH --output=logs/%j.out
+#SBATCH --error=logs/%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -9,15 +9,17 @@
 #SBATCH --gpus=1
 #SBATCH --time=24:00:00
 
-# 1. Force directory to your project folder
-cd /media02/nnthao15/Experiments/CProxy-SFDA
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+echo "Working directory: $SCRIPT_DIR"
+cd "$SCRIPT_DIR"
 
-# 2. Activate Environment
+# Activate Environment (auto-detect conda or use local venv)
 echo "Running on node: $(hostname)"
 source /media02/nnthao15/miniconda3/bin/activate
 conda activate ./venv
 
-# 3. SET DATA PATH (Directly to Media)
+
 LOCAL_DATA="/media02/nnthao15/Cuong/C-SFDA/data"
 
 echo "Using data from: $LOCAL_DATA"
