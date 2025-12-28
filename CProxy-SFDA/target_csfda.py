@@ -30,6 +30,7 @@ from utils import (
     get_distances,
     is_master,
     per_class_accuracy,
+    log_per_class_thresholds,
     remove_wrap_arounds,
     save_checkpoint,
     use_wandb,
@@ -110,7 +111,7 @@ def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", 
 
 
 @torch.no_grad()
-def eval_and_label_dataset(dataloader, model, args):
+def eval_and_label_dataset(dataloader, model, args, per_class_conf_th=None, per_class_uncer_th=None):
     wandb_dict = dict()
 
     # Make sure to switch to eval mode
@@ -160,6 +161,15 @@ def eval_and_label_dataset(dataloader, model, args):
         )
         wandb_dict["Test Avg"] = acc_per_class.mean()
         wandb_dict["Test Per-class"] = acc_per_class
+        
+        # Log thresholds right after accuracy
+        if per_class_conf_th is not None and per_class_uncer_th is not None:
+            conf_mean, uncer_mean = log_per_class_thresholds(
+                per_class_conf_th, 
+                per_class_uncer_th, 
+                name="Current Thresholds"
+            )
+            return acc_per_class, conf_mean, uncer_mean
 
     if use_wandb(args):
         wandb.log(wandb_dict)
@@ -399,6 +409,13 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
     accuracies  = []
     batch_accuracies = [] # New: Track overall batch accuracy
     per_class_accs = []
+    
+    # Track thresholds per epoch
+    epoch_conf_th_means = []
+    epoch_uncer_th_means = []
+    epoch_conf_th_per_class = []
+    epoch_uncer_th_per_class = []
+    
     sel_Samples = []
     
     # Accumulators for running averages
@@ -772,6 +789,10 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
                     'total_loss': total_losses, # New: Pass total loss
                     'val_acc_mean': acc_classes,
                     'val_acc_per_class': per_class_accs,
+                    'conf_th_mean': epoch_conf_th_means,
+                    'uncer_th_mean': epoch_uncer_th_means,
+                    'conf_th_per_class': epoch_conf_th_per_class,
+                    'uncer_th_per_class': epoch_uncer_th_per_class,
                 }
                 plot_training_stats(current_stats, save_path="training_process.png")
 
@@ -781,7 +802,18 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             ind += 1 
 
             ## Evaluate the model ##
-        acc_per_class = eval_and_label_dataset(val_loader, model, args)
+        result = eval_and_label_dataset(val_loader, model, args, per_class_conf_th, per_class_uncer_th)
+        
+        # Handle return values
+        if isinstance(result, tuple):
+            acc_per_class, conf_mean, uncer_mean = result
+            if is_master(args):
+                epoch_conf_th_means.append(conf_mean)
+                epoch_uncer_th_means.append(uncer_mean)
+                epoch_conf_th_per_class.append(per_class_conf_th.cpu().numpy())
+                epoch_uncer_th_per_class.append(per_class_uncer_th.cpu().numpy())
+        else:
+            acc_per_class = result
         
         # Generate t-SNE visualization every epoch
         # if is_master(args):

@@ -325,6 +325,32 @@ def per_class_accuracy(y_true, y_pred):
     return acc_per_class
 
 
+def log_per_class_thresholds(per_class_conf_th, per_class_uncer_th, name="Thresholds"):
+    """Log per-class confidence and uncertainty thresholds.
+    
+    Args:
+        per_class_conf_th: numpy array or tensor of per-class confidence thresholds
+        per_class_uncer_th: numpy array or tensor of per-class uncertainty thresholds
+        name: string prefix for logging
+    """
+    if torch.is_tensor(per_class_conf_th):
+        per_class_conf_th = per_class_conf_th.cpu().numpy()
+    if torch.is_tensor(per_class_uncer_th):
+        per_class_uncer_th = per_class_uncer_th.cpu().numpy()
+    
+    conf_mean = per_class_conf_th.mean().round(4)
+    uncer_mean = per_class_uncer_th.mean().round(4)
+    
+    logging.info(
+        f"{name} - Confidence thresholds per class: {np.round(per_class_conf_th, 4)}, mean: {conf_mean}"
+    )
+    logging.info(
+        f"{name} - Uncertainty thresholds per class: {np.round(per_class_uncer_th, 4)}, mean: {uncer_mean}"
+    )
+    
+    return conf_mean, uncer_mean
+
+
 def get_distances(X, Y, dist_type="euclidean"):
     """
     Args:
@@ -350,10 +376,20 @@ def use_wandb(args):
 
 
 def plot_training_stats(stats, save_path="training_process.png"):
-    fig = plt.figure(figsize=(16, 12))
+    # Determine if we have threshold data to plot
+    has_thresholds = ('conf_th_mean' in stats and len(stats.get('conf_th_mean', [])) > 0) or \
+                     ('uncer_th_mean' in stats and len(stats.get('uncer_th_mean', [])) > 0)
+    
+    # Adjust figure layout based on whether we have thresholds
+    if has_thresholds:
+        fig = plt.figure(figsize=(20, 12))
+        subplot_layout = (2, 3)  # 2 rows, 3 columns
+    else:
+        fig = plt.figure(figsize=(16, 12))
+        subplot_layout = (2, 2)  # 2 rows, 2 columns
     
     # 1. Losses (Batch-wise)
-    plt.subplot(2, 2, 1)
+    plt.subplot(subplot_layout[0], subplot_layout[1], 1)
     if 'mix_cls_loss' in stats and len(stats['mix_cls_loss']) > 0:
         plt.plot(stats['mix_cls_loss'], label='Mix Class Loss', alpha=0.6, linewidth=0.5)
     if 'remix_reg_loss' in stats and len(stats['remix_reg_loss']) > 0:
@@ -373,7 +409,7 @@ def plot_training_stats(stats, save_path="training_process.png"):
     plt.grid(True, alpha=0.3)
 
     # 2. Pseudo Label Accuracy (Batch-wise)
-    plt.subplot(2, 2, 2)
+    plt.subplot(subplot_layout[0], subplot_layout[1], 2)
     has_acc_plot = False
     if 'pseudo_label_acc' in stats and len(stats['pseudo_label_acc']) > 0:
         plt.plot(stats['pseudo_label_acc'], label='Selected PL Acc (High Conf)', color='green', alpha=0.8)
@@ -390,10 +426,14 @@ def plot_training_stats(stats, save_path="training_process.png"):
     plt.grid(True, alpha=0.3)
 
     # 3. Validation Mean Accuracy (Epoch-wise)
-    plt.subplot(2, 2, 3)
+    plt.subplot(subplot_layout[0], subplot_layout[1], 3)
     if 'val_acc_mean' in stats and len(stats['val_acc_mean']) > 0:
-        plt.plot(range(1, len(stats['val_acc_mean']) + 1), stats['val_acc_mean'], 'o-', label='Val Mean Acc', color='blue')
-        plt.title(f'Validation Mean Accuracy (Last: {stats["val_acc_mean"][-1]:.2f}%)')
+        epochs = range(1, len(stats['val_acc_mean']) + 1)
+        val_acc_array = np.array(stats['val_acc_mean'])
+        max_acc = np.max(val_acc_array)
+        
+        plt.plot(epochs, stats['val_acc_mean'], 'o-', label='Val Mean Acc', color='blue')
+        plt.title(f'Validation Mean Accuracy (Last: {stats["val_acc_mean"][-1]:.2f}%, Max: {max_acc:.2f}%)')
         plt.legend()
     else:
         plt.title('Validation Mean Accuracy')
@@ -402,7 +442,7 @@ def plot_training_stats(stats, save_path="training_process.png"):
     plt.grid(True, alpha=0.3)
 
     # 4. Validation Per-Class Accuracy (Epoch-wise)
-    plt.subplot(2, 2, 4)
+    plt.subplot(subplot_layout[0], subplot_layout[1], 4)
     if 'val_acc_per_class' in stats and len(stats['val_acc_per_class']) > 0:
         data = np.array(stats['val_acc_per_class'])
         # data shape: (epochs, classes)
@@ -429,6 +469,51 @@ def plot_training_stats(stats, save_path="training_process.png"):
     else:
         plt.title('Per-Class Validation Accuracy')
         plt.axis('off')
+
+    # 5. Confidence Thresholds (Epoch-wise)
+    if has_thresholds:
+        plt.subplot(subplot_layout[0], subplot_layout[1], 5)
+        if 'conf_th_mean' in stats and len(stats['conf_th_mean']) > 0:
+            epochs = range(1, len(stats['conf_th_mean']) + 1)
+            plt.plot(epochs, stats['conf_th_mean'], 'o-', label='Mean Conf Threshold', color='purple')
+            
+            # Plot per-class if available
+            if 'conf_th_per_class' in stats and len(stats['conf_th_per_class']) > 0:
+                data = np.array(stats['conf_th_per_class'])
+                if data.shape[1] <= 12:  # Only plot individual lines for small number of classes
+                    for i in range(data.shape[1]):
+                        plt.plot(epochs, data[:, i], alpha=0.3, linewidth=0.8)
+            
+            plt.title('Confidence Thresholds')
+            plt.xlabel('Epoch')
+            plt.ylabel('Confidence Threshold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+        else:
+            plt.title('Confidence Thresholds')
+            plt.axis('off')
+
+        # 6. Uncertainty Thresholds (Epoch-wise)
+        plt.subplot(subplot_layout[0], subplot_layout[1], 6)
+        if 'uncer_th_mean' in stats and len(stats['uncer_th_mean']) > 0:
+            epochs = range(1, len(stats['uncer_th_mean']) + 1)
+            plt.plot(epochs, stats['uncer_th_mean'], 'o-', label='Mean Uncer Threshold', color='brown')
+            
+            # Plot per-class if available
+            if 'uncer_th_per_class' in stats and len(stats['uncer_th_per_class']) > 0:
+                data = np.array(stats['uncer_th_per_class'])
+                if data.shape[1] <= 12:  # Only plot individual lines for small number of classes
+                    for i in range(data.shape[1]):
+                        plt.plot(epochs, data[:, i], alpha=0.3, linewidth=0.8)
+            
+            plt.title('Uncertainty Thresholds')
+            plt.xlabel('Epoch')
+            plt.ylabel('Uncertainty Threshold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+        else:
+            plt.title('Uncertainty Thresholds')
+            plt.axis('off')
 
     plt.tight_layout()
     plt.savefig(save_path)
