@@ -9,15 +9,17 @@
 #SBATCH --gpus=1
 #SBATCH --time=24:00:00
 
-# Get the directory where the script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-echo "Working directory: $SCRIPT_DIR"
+# Get the directory where the slurm script is located (where sbatch was run from)
+SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
+echo "Script directory: $SCRIPT_DIR"
+echo "Current working directory: $(pwd)"
 cd "$SCRIPT_DIR"
+echo "Changed to: $(pwd)"
 
 # Activate Environment (auto-detect conda or use local venv)
 echo "Running on node: $(hostname)"
 source /media02/nnthao15/miniconda3/bin/activate
-conda activate ./venv
+conda activate "$SCRIPT_DIR/venv"
 
 
 LOCAL_DATA="/media02/nnthao15/Cuong/C-SFDA/data"
@@ -36,7 +38,7 @@ python main_csfda.py \
     data.workers=4 \
     model_src.arch="resnet101" \
     model_tta.src_log_dir="./checkpoint/VISDA-C" \
-    learn.epochs=200 \
+    learn.epochs=250 \
     optim.lr=2e-4 \
     multiprocessing_distributed=false \
     use_wandb=false \

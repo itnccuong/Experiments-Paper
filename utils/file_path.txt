@@ -1,2 +1,1 @@
-/media02/nnthao15/Experiments/CProxy-SFDA/training_process.png
-/media02/nnthao15/Experiments/CProxy-SFDA/training_process4.png
+/media02/nnthao15/Experiments-Cuong/CProxy-SFDA/training_process.png

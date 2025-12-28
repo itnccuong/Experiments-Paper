@@ -50,15 +50,11 @@ def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", 
     
     features_list = []
     labels_list = []
-    paths_list = []
     
     logging.info("Extracting features for t-SNE...")
     num_samples = 0
     
     for _, imgs, labels, idxs in dataloader:
-        if num_samples >= max_samples:
-            break
-            
         imgs = imgs.to("cuda")
         
         # Extract features (not logits)
@@ -68,6 +64,13 @@ def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", 
         labels_list.append(labels)
         
         num_samples += imgs.size(0)
+        if num_samples >= max_samples:
+            break
+    
+    # Check if we have any features
+    if len(features_list) == 0:
+        logging.warning("No features extracted for t-SNE visualization")
+        return
     
     # Concatenate all features and labels
     features = torch.cat(features_list, dim=0)[:max_samples]
@@ -75,9 +78,16 @@ def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", 
     
     logging.info(f"Running t-SNE on {features.shape[0]} samples...")
     
-    # Apply t-SNE
-    tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
-    features_2d = tsne.fit_transform(features.numpy())
+    # Apply t-SNE with adaptive perplexity
+    n_samples = features.shape[0]
+    perplexity = min(30, max(5, n_samples // 100))  # Adaptive: 5-30 based on sample count
+    
+    try:
+        tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity, max_iter=1000)
+        features_2d = tsne.fit_transform(features.numpy())
+    except Exception as e:
+        logging.error(f"t-SNE failed: {e}")
+        return
     
     # Plot
     plt.figure(figsize=(10, 8))
@@ -85,8 +95,13 @@ def visualize_tsne(dataloader, model, args, save_path="tsne_visualization.png", 
     # Determine number of classes
     num_classes = labels.max().item() + 1
     
-    # Use a colormap
-    colors = plt.cm.tab20(np.linspace(0, 1, num_classes))
+    # Use appropriate colormap based on number of classes
+    if num_classes <= 10:
+        colors = plt.cm.tab10(np.linspace(0, 1, num_classes))
+    elif num_classes <= 20:
+        colors = plt.cm.tab20(np.linspace(0, 1, num_classes))
+    else:
+        colors = plt.cm.gist_rainbow(np.linspace(0, 1, num_classes))
     
     for class_id in range(num_classes):
         mask = labels == class_id
@@ -816,9 +831,9 @@ def train_csfda(train_loader, val_loader, model, optimizer, args):
             acc_per_class = result
         
         # Generate t-SNE visualization every epoch
-        # if is_master(args):
-        #     tsne_path = os.path.join(args.model_tta.src_log_dir, f"tsne_epoch_{epoch}.png")
-        #     visualize_tsne(val_loader, model, args, save_path=tsne_path, max_samples=1500)
+        if is_master(args):
+            tsne_path = os.path.join(args.model_tta.src_log_dir, f"tsne_epoch_{epoch}.png")
+            visualize_tsne(val_loader, model, args, save_path=tsne_path, max_samples=1500)
         
         model.train()
         acc_classes.append(acc_per_class.mean().item() if torch.is_tensor(acc_per_class.mean()) else acc_per_class.mean())
