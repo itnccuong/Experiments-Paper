@@ -7,7 +7,7 @@ import time
 
 load_dotenv()
 
-def upload_to_discord(images_path, webhook_url):
+def upload_to_discord(images_path, webhook_url, user):
     with open(images_path, 'rb') as f:
         list_of_images = f.read().splitlines()
         
@@ -21,7 +21,7 @@ def upload_to_discord(images_path, webhook_url):
         
         requests.post(
             webhook_url,
-            json={'content': f'# 🚀 Uploading {len(list_of_images)} images\n*{timestamp}*'}
+            json={'content': f'# 🚀 Uploading {len(list_of_images)} images by {user}\n*{timestamp}*'}
         )
 
         for idx, image_path in enumerate(list_of_images, 1):
@@ -30,7 +30,7 @@ def upload_to_discord(images_path, webhook_url):
             # Send message with caption first
             requests.post(
                 webhook_url,
-                json={'content': f'**Image {idx}/{len(list_of_images)}:** `{image_name}`'}
+                json={'content': f'**Image {idx}/{len(list_of_images)}:** `{image_name}` by {user}'}
             )
             
             # Then send the image
@@ -50,13 +50,14 @@ def upload_to_discord(images_path, webhook_url):
         print(f"✅ {timestamp} - All {len(list_of_images)} images uploaded!")
         print("=" * 60)
         
-        requests.post(
-            webhook_url,
-            json={'content': f'# ✅ All {len(list_of_images)} images uploaded!\n*{timestamp}*'}
-        )
+        # requests.post(
+        #     webhook_url,
+        #     json={'content': f'# ✅ All {len(list_of_images)} images uploaded!\n*{timestamp}*'}
+        # )
 
 if __name__ == '__main__':
     web_hook = os.environ.get('web_hook')
+    user = os.environ.get('user')
     image_list_path = '/media02/nnthao15/Experiments/utils/file_path.txt'
     
     print("🔄 Starting auto-upload service (every 20 minutes)")
@@ -64,7 +65,7 @@ if __name__ == '__main__':
     
     try:
         while True:
-            upload_to_discord(image_list_path, web_hook)
+            upload_to_discord(image_list_path, web_hook, user)
             print(f"\n⏰ Waiting 20 minutes until next upload...")
             print(f"Next upload at: {(dt.datetime.now(pendulum.timezone('Asia/Ho_Chi_Minh')) + dt.timedelta(minutes=20)).strftime('%Y-%m-%d %H:%M:%S')}\n")
             time.sleep(20 * 60)  # 20 minutes
