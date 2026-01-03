@@ -62,43 +62,45 @@ def load_model(checkpoint_path, num_classes, bottleneck_dim=256, device="cuda"):
 
 
 @torch.no_grad()
-def extract_features(model, dataloader, device="cuda", max_samples=None):
+def extract_features(model, dataloader, device="cuda"):
     """Extract features and labels from the dataset."""
     features_list = []
     labels_list = []
-    predictions_list = []
 
-    total = 0
     for _, imgs, labels, _ in dataloader:
         imgs = imgs.to(device)
-        feats, logits = model(imgs, return_feats=True)
-        preds = logits.argmax(dim=1)
+        feats, _ = model(imgs, return_feats=True)
 
         features_list.append(feats.cpu())
         labels_list.append(labels)
-        predictions_list.append(preds.cpu())
-
-        total += imgs.size(0)
-        if max_samples and total >= max_samples:
-            break
 
     features = torch.cat(features_list)
     labels = torch.cat(labels_list)
-    predictions = torch.cat(predictions_list)
 
-    if max_samples:
-        features = features[:max_samples]
-        labels = labels[:max_samples]
-        predictions = predictions[:max_samples]
-
-    return features.numpy(), labels.numpy(), predictions.numpy()
+    return features.numpy(), labels.numpy()
 
 
-def plot_tsne(features_2d, labels, predictions, num_classes, output_path, class_names=None):
-    """Create t-SNE visualization with confusion analysis."""
+def sample_per_class(features, labels, max_per_class=100):
+    """Sample up to max_per_class samples from each class."""
+    unique_classes = np.unique(labels)
+    selected_indices = []
 
-    # Create figure with subplots
-    fig, axes = plt.subplots(1, 2, figsize=(20, 8))
+    for c in unique_classes:
+        class_indices = np.where(labels == c)[0]
+        if len(class_indices) > max_per_class:
+            # Randomly sample
+            np.random.seed(42)
+            class_indices = np.random.choice(class_indices, max_per_class, replace=False)
+        selected_indices.extend(class_indices)
+
+    selected_indices = np.array(selected_indices)
+    return features[selected_indices], labels[selected_indices]
+
+
+def plot_tsne(features_2d, labels, num_classes, output_path, class_names=None):
+    """Create simple t-SNE visualization colored by true class."""
+
+    fig, ax = plt.subplots(figsize=(12, 10))
 
     # Color palette
     if num_classes <= 12:
@@ -108,110 +110,29 @@ def plot_tsne(features_2d, labels, predictions, num_classes, output_path, class_
         if num_classes > 20:
             colors = plt.cm.nipy_spectral(np.linspace(0, 1, num_classes))
 
-    # --- Left plot: colored by TRUE labels ---
-    ax1 = axes[0]
     for c in range(num_classes):
         mask = labels == c
         if mask.sum() > 0:
             label = class_names[c] if class_names else f"Class {c}"
-            ax1.scatter(
+            ax.scatter(
                 features_2d[mask, 0],
                 features_2d[mask, 1],
                 c=[colors[c % len(colors)]],
-                label=label,
-                alpha=0.6,
-                s=15
+                label=f"{label} ({mask.sum()})",
+                alpha=0.7,
+                s=20
             )
 
-    ax1.set_title("t-SNE colored by TRUE labels", fontsize=14)
-    ax1.set_xlabel("t-SNE dim 1")
-    ax1.set_ylabel("t-SNE dim 2")
+    ax.set_title("t-SNE Visualization", fontsize=14)
+    ax.set_xlabel("t-SNE dim 1")
+    ax.set_ylabel("t-SNE dim 2")
     if num_classes <= 20:
-        ax1.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=8)
-
-    # --- Right plot: show misclassifications ---
-    ax2 = axes[1]
-    correct_mask = labels == predictions
-    wrong_mask = ~correct_mask
-
-    # Plot correct predictions (gray, smaller)
-    ax2.scatter(
-        features_2d[correct_mask, 0],
-        features_2d[correct_mask, 1],
-        c='lightgray',
-        alpha=0.3,
-        s=10,
-        label=f'Correct ({correct_mask.sum()})'
-    )
-
-    # Plot wrong predictions colored by TRUE label
-    for c in range(num_classes):
-        mask = (labels == c) & wrong_mask
-        if mask.sum() > 0:
-            label = class_names[c] if class_names else f"Class {c}"
-            ax2.scatter(
-                features_2d[mask, 0],
-                features_2d[mask, 1],
-                c=[colors[c % len(colors)]],
-                label=f"{label} misclassified ({mask.sum()})",
-                alpha=0.8,
-                s=25,
-                edgecolors='black',
-                linewidths=0.5
-            )
-
-    ax2.set_title("Misclassified samples (colored by TRUE label)", fontsize=14)
-    ax2.set_xlabel("t-SNE dim 1")
-    ax2.set_ylabel("t-SNE dim 2")
-    if num_classes <= 20:
-        ax2.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=7)
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=9)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Saved t-SNE plot to: {output_path}")
-
-
-def print_confusion_summary(labels, predictions, num_classes, class_names=None):
-    """Print summary of what classes are confused with what."""
-    print("\n" + "="*60)
-    print("CONFUSION SUMMARY")
-    print("="*60)
-
-    accuracy = (labels == predictions).mean() * 100
-    print(f"\nOverall Accuracy: {accuracy:.2f}%\n")
-
-    # Per-class accuracy and confusion
-    print(f"{'Class':<15} {'Acc%':<8} {'Most confused with'}")
-    print("-"*60)
-
-    for c in range(num_classes):
-        mask = labels == c
-        if mask.sum() == 0:
-            continue
-
-        class_name = class_names[c] if class_names else f"Class {c}"
-        class_acc = (predictions[mask] == c).mean() * 100
-
-        # Find what this class is confused with
-        wrong_preds = predictions[mask & (predictions != c)]
-        if len(wrong_preds) > 0:
-            unique, counts = np.unique(wrong_preds, return_counts=True)
-            sorted_idx = np.argsort(-counts)[:3]  # Top 3 confusions
-
-            confused_with = []
-            for idx in sorted_idx:
-                conf_class = unique[idx]
-                conf_name = class_names[conf_class] if class_names else f"Class {conf_class}"
-                confused_with.append(f"{conf_name}({counts[idx]})")
-
-            conf_str = ", ".join(confused_with)
-        else:
-            conf_str = "-"
-
-        print(f"{class_name:<15} {class_acc:<8.1f} {conf_str}")
-
-    print("="*60 + "\n")
 
 
 def main():
@@ -228,8 +149,8 @@ def main():
                         help="Bottleneck dimension (default: 256)")
     parser.add_argument("--output", type=str, default="tsne_visualization.png",
                         help="Output path for the plot")
-    parser.add_argument("--max_samples", type=int, default=3000,
-                        help="Max samples for t-SNE (default: 3000)")
+    parser.add_argument("--samples_per_class", type=int, default=100,
+                        help="Max samples per class for t-SNE (default: 100)")
     parser.add_argument("--batch_size", type=int, default=128,
                         help="Batch size for inference (default: 128)")
     parser.add_argument("--perplexity", type=int, default=30,
@@ -270,11 +191,14 @@ def main():
     print(f"Dataset size: {len(dataset)}")
 
     # Extract features
-    print(f"Extracting features (max {args.max_samples} samples)...")
-    features, labels, predictions = extract_features(
-        model, dataloader, args.device, args.max_samples
-    )
+    print("Extracting features...")
+    features, labels = extract_features(model, dataloader, args.device)
     print(f"Extracted features shape: {features.shape}")
+
+    # Sample per class
+    print(f"Sampling up to {args.samples_per_class} samples per class...")
+    features, labels = sample_per_class(features, labels, args.samples_per_class)
+    print(f"After sampling: {features.shape[0]} samples")
 
     # Run t-SNE
     print(f"Running t-SNE (perplexity={args.perplexity})...")
@@ -290,12 +214,9 @@ def main():
     # Get class names
     class_names = CLASS_NAMES.get(args.num_classes)
 
-    # Print confusion summary
-    print_confusion_summary(labels, predictions, args.num_classes, class_names)
-
     # Plot and save
     print("Creating visualization...")
-    plot_tsne(features_2d, labels, predictions, args.num_classes, args.output, class_names)
+    plot_tsne(features_2d, labels, args.num_classes, args.output, class_names)
 
     print("Done!")
 
